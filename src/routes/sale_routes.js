@@ -4,6 +4,7 @@ import {
   createSale,
   getSales,
   getSaleById,
+  recordPayment,
   cancelSale,
 } from "../controllers/sale_controller.js";
 
@@ -19,6 +20,9 @@ saleRouter.get("/", authMiddleware, getSales);
 
 // Get sale by ID
 saleRouter.get("/:saleId", authMiddleware, getSaleById);
+
+// Record payment on a sale (partial/unpaid → paid)
+saleRouter.patch("/:saleId/payment", authMiddleware, recordPayment);
 
 // Cancel sale
 saleRouter.delete("/:saleId", authMiddleware, cancelSale);

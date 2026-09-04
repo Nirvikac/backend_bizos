@@ -338,6 +338,81 @@ const getSaleById = async (req, res) => {
 };
 
 // ============================================================
+// RECORD PAYMENT ON A SALE (collect money owed later)
+// ============================================================
+
+const recordPayment = async (req, res) => {
+  try {
+    const { saleId } = req.params;
+
+    // Amount the customer is paying NOW, on top of any earlier payment.
+    const amount = Number(req.body.amount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment amount must be greater than zero",
+      });
+    }
+
+    const business = await BusinessDetail.findOne({
+      ownerId: req.user.id,
+    });
+
+    if (!business) {
+      return res.status(404).json({
+        success: false,
+        message: "Business not found",
+      });
+    }
+
+    const sale = await Sale.findOne({
+      _id: saleId,
+      businessId: business._id,
+    });
+
+    if (!sale) {
+      return res.status(404).json({
+        success: false,
+        message: "Sale not found",
+      });
+    }
+
+    // Already fully paid — nothing left to collect.
+    const remaining = sale.grandTotal - sale.paidAmount;
+
+    if (remaining <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "This sale is already fully paid",
+      });
+    }
+
+    // Never let paidAmount exceed the grand total.
+    sale.paidAmount = Math.min(sale.paidAmount + amount, sale.grandTotal);
+
+    sale.paymentStatus =
+      sale.paidAmount >= sale.grandTotal ? "Paid" : "Partial";
+
+    await sale.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment received",
+      sale,
+    });
+  } catch (error) {
+    console.error("Record Payment Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to record payment",
+      error: error.message,
+    });
+  }
+};
+
+// ============================================================
 // DELETE / CANCEL SALE
 // ============================================================
 
@@ -420,4 +495,4 @@ const cancelSale = async (req, res) => {
   }
 };
 
-export { createSale, getSales, getSaleById, cancelSale };
+export { createSale, getSales, getSaleById, recordPayment, cancelSale };
