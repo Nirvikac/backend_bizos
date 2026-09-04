@@ -1,0 +1,8 @@
+# Dependencies
+node_modules/
+
+# Actual environment variables (secrets)
+.env
+
+# Keep .env.example tracked, ignore other .env files if needed
+!.env.example
