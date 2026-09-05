@@ -1,16 +1,24 @@
 import nodemailer from "nodemailer";
 
-// Gmail SMTP transporter with sensible timeouts so sendMail never hangs for
-// minutes when Gmail is slow or unreachable (common from cloud hosts).
+// Send through Resend's SMTP (smtp.resend.com) using your Resend API key.
+// Unlike Gmail SMTP, Resend is built for transactional email and works
+// reliably from cloud hosts (Render). Free tier = 100 emails/day.
+//
+// Env required:
+//   RESEND_API_KEY - your Resend API key (starts with re_)
+//   RESEND_FROM    - sender address, e.g. onboarding@resend.dev (sandbox) or
+//                    a verified domain like no-reply@yourdomain.com (prod)
 const transportor = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.resend.com",
+  port: 465,
+  secure: true,
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASS,
+    user: "resend",
+    pass: process.env.RESEND_API_KEY,
   },
-  connectionTimeout: 60000,
-  greetingTimeout: 60000,
-  socketTimeout: 60000,
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 40000,
 });
 
 // Build the public base URL for verification links.
@@ -41,10 +49,11 @@ const getVerificationBaseUrl = (req) => {
 const sendVerificationEmail = async (email, verificationToken, req = null) => {
   const baseUrl = getVerificationBaseUrl(req);
   const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
+  const from = process.env.RESEND_FROM || process.env.EMAIL_USER;
 
   try {
     const info = await transportor.sendMail({
-      from: process.env.EMAIL_USER,
+      from,
       to: email,
       subject: "Email Verification",
       html: `
@@ -83,7 +92,7 @@ const sendVerificationEmail = async (email, verificationToken, req = null) => {
     });
 
     console.log(
-      `[EMAIL OK] verification email accepted by Gmail -> ${email} (messageId: ${info.messageId})`,
+      `[EMAIL OK] verification email accepted by Resend -> ${email} (messageId: ${info.messageId})`,
     );
   } catch (error) {
     console.error(
