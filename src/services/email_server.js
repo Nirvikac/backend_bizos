@@ -1,17 +1,58 @@
-import nodemailer from "nodemailer";
+// Resend transactional email via HTTP API (port 443).
+// Works from any cloud host (Render included) — unlike Gmail SMTP, which
+// Render blocks at the network level (TCP Connection timeout).
+//
+// Env required:
+//   RESEND_API_KEY - Resend API key (re_...) from resend.com > API Keys
+//   RESEND_FROM    - sender address.
+//                    Sandbox:  onboarding@resend.dev (only delivers to the
+//                              email you registered Resend with)
+//                    Production: no-reply@yourdomain.com (needs a verified
+//                              domain — gmail.com CANNOT be the sender)
+//
+// Registration, token logic, routes, DB schema and Flutter integration are
+// unchanged — only the delivery mechanism is Resend.
 
-// Gmail SMTP transporter with generous timeouts so sendMail never hangs for
-// minutes when Gmail is slow or unreachable (common from cloud hosts).
-const transportor = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASS,
-  },
-  connectionTimeout: 60000,
-  greetingTimeout: 60000,
-  socketTimeout: 60000,
-});
+const RESEND_ENDPOINT = "https://api.resend.com/emails";
+
+async function sendVerificationEmail(email, verificationToken, req = null) {
+  const baseUrl = getVerificationBaseUrl(req);
+  const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
+
+  if (!process.env.RESEND_API_KEY) {
+    console.error("[EMAIL FAILED] RESEND_API_KEY is not set");
+    throw new Error("RESEND_API_KEY is not set");
+  }
+
+  const fromEmail = process.env.RESEND_FROM || "onboarding@resend.dev";
+
+  const response = await fetch(RESEND_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: `Bizos <${fromEmail}>`,
+      to: [email],
+      subject: "Email Verification",
+      html: buildVerificationHtml(verificationLink),
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    console.error(
+      `[EMAIL FAILED] verification email NOT sent -> ${email}. Resend API ${response.status}: ${body}`,
+    );
+    throw new Error(`Resend API ${response.status}: ${body}`);
+  }
+
+  const data = await response.json();
+  console.log(
+    `[EMAIL OK] verification email accepted by Resend -> ${email} (id: ${data.id})`,
+  );
+}
 
 // Build the public base URL for verification links.
 // Prefers BACKEND_URL when it is a real public URL; otherwise falls back to
@@ -37,17 +78,7 @@ const getVerificationBaseUrl = (req) => {
   return "https://backend-bizos.onrender.com";
 };
 
-// Function to send email
-const sendVerificationEmail = async (email, verificationToken, req = null) => {
-  const baseUrl = getVerificationBaseUrl(req);
-  const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
-
-  try {
-    const info = await transportor.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Email Verification",
-      html: `
+const buildVerificationHtml = (verificationLink) => `
       <div style="
         font-family: Arial, sans-serif;
         max-width: 600px;
@@ -79,21 +110,6 @@ const sendVerificationEmail = async (email, verificationToken, req = null) => {
           This verification link will expire in 15 minutes.
         </p>
       </div>
-    `,
-    });
-
-    console.log(
-      `[EMAIL OK] verification email accepted by Gmail -> ${email} (messageId: ${info.messageId})`,
-    );
-  } catch (error) {
-    console.error(
-      `[EMAIL FAILED] verification email NOT sent -> ${email}. Reason: ${error.message}`,
-    );
-    if (error.responseCode) {
-      console.error(`[EMAIL FAILED] SMTP response code: ${error.responseCode}`);
-    }
-    throw error;
-  }
-};
+    `;
 
 export { sendVerificationEmail };
