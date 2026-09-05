@@ -12,8 +12,35 @@ const registerUser = async (req, res) => {
     });
 
     if (existingUser) {
-      return res.status(400).json({
-        message: "User already exists",
+      // Already verified → tell them to log in instead.
+      if (existingUser.isEmailVerified) {
+        return res.status(400).json({
+          message: "User already exists. Please login.",
+        });
+      }
+
+      // Registered before but never verified (e.g. the first email
+      // never arrived). Resend a fresh verification email so the
+      // registration can be completed instead of blocking the user.
+      const verificationToken = crypto.randomBytes(32).toString("hex");
+      existingUser.emailVerificationToken = crypto
+        .createHash("sha256")
+        .update(verificationToken)
+        .digest("hex");
+      existingUser.emailVerificationTokenExpiry = Date.now() + 15 * 60 * 1000;
+
+      await existingUser.save();
+
+      // Send in the background — never block the response.
+      sendVerificationEmail(existingUser.email, verificationToken, req).catch(
+        (error) => {
+          console.error("Resend verification email failed:", error.message);
+        },
+      );
+
+      return res.status(200).json({
+        message:
+          "An account with this email already exists. A new verification email has been sent.",
       });
     }
 
@@ -53,8 +80,13 @@ const registerUser = async (req, res) => {
     // Save user first
     await newUser.save();
 
-    // Send verification email
-    await sendVerificationEmail(newUser.email, verificationToken);
+    // Send verification email in the background — never block the response.
+    // Registration must return fast even if Gmail SMTP is slow/unreachable.
+    sendVerificationEmail(newUser.email, verificationToken, req).catch(
+      (error) => {
+        console.error("Verification email failed:", error.message);
+      },
+    );
 
     // Generate JWT
     const token = generateToken(newUser._id);
@@ -92,7 +124,7 @@ const loginUser = async (req, res) => {
     // 🔐 Email verification check
     if (!user.isEmailVerified) {
       return res.status(403).json({
-        message: "Please verdify your email before logging in.",
+        message: "Please verify your email before logging in.",
       });
     }
 

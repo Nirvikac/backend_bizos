@@ -3,6 +3,7 @@ import Sale from "../../src/models/sale.js";
 import Product from "../../src/models/product_schema.js";
 import Inventory from "../../src/models/inventory_model.js";
 import BusinessDetail from "../../src/models/business_detail_schema.js";
+import Customer from "../../src/models/customer_schema.js";
 
 // ============================================================
 // CREATE SALE
@@ -17,6 +18,8 @@ const createSale = async (req, res) => {
     const {
       items,
       customerId = null,
+      customerName = "",
+      customerPhone = "",
       discount = 0,
       tax = 0,
       paymentMethod = "Cash",
@@ -52,7 +55,70 @@ const createSale = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // 3. Validate discount and tax
+    // 3. Resolve the customer (real Customer record when possible)
+    // --------------------------------------------------------
+
+    // The till sends a typed customer name; find an existing customer for
+    // this business or create one, so khata/history reference a real
+    // Customer instead of a name floating inside the notes.
+    let resolvedCustomerId = customerId;
+
+    if (customerId) {
+      const existing = await Customer.findOne({
+        _id: customerId,
+        businessId: business._id,
+      }).session(session);
+
+      if (!existing) {
+        await session.abortTransaction();
+
+        return res.status(404).json({
+          success: false,
+          message: "Customer not found",
+        });
+      }
+    } else if (customerName && customerName.trim()) {
+      const name = customerName.trim();
+      const phone = (customerPhone || "").trim();
+
+      // Prefer phone, then exact name — avoids duplicate customers for the
+      // same person when the name is typed slightly differently.
+      let customer = null;
+
+      if (phone) {
+        customer = await Customer.findOne({
+          businessId: business._id,
+          phone,
+        }).session(session);
+      }
+
+      if (!customer) {
+        customer = await Customer.findOne({
+          businessId: business._id,
+          name,
+        }).session(session);
+      }
+
+      if (!customer) {
+        const created = await Customer.create(
+          [
+            {
+              businessId: business._id,
+              name,
+              phone,
+            },
+          ],
+          { session },
+        );
+
+        customer = created[0];
+      }
+
+      resolvedCustomerId = customer._id;
+    }
+
+    // --------------------------------------------------------
+    // 4. Validate discount and tax
     // --------------------------------------------------------
 
     if (discount < 0 || tax < 0) {
@@ -63,13 +129,13 @@ const createSale = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // 4. Generate invoice number
+    // 5. Generate invoice number
     // --------------------------------------------------------
 
     const invoiceNumber = `INV-${Date.now()}`;
 
     // --------------------------------------------------------
-    // 5. Process sale items
+    // 6. Process sale items
     // --------------------------------------------------------
 
     const saleItems = [];
@@ -168,7 +234,7 @@ const createSale = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // 6. Calculate final amount
+    // 7. Calculate final amount
     // --------------------------------------------------------
 
     const grandTotal = subtotal - discount + tax;
@@ -183,7 +249,7 @@ const createSale = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // 7. Validate paid amount
+    // 8. Validate paid amount
     // --------------------------------------------------------
 
     if (paidAmount < 0) {
@@ -196,7 +262,7 @@ const createSale = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // 8. Create sale
+    // 9. Create sale
     // --------------------------------------------------------
 
     const sale = await Sale.create(
@@ -204,7 +270,7 @@ const createSale = async (req, res) => {
         {
           businessId: business._id,
           invoiceNumber,
-          customerId,
+          customerId: resolvedCustomerId,
           items: saleItems,
           subtotal,
           discount,
@@ -213,6 +279,10 @@ const createSale = async (req, res) => {
           paymentMethod,
           paymentStatus,
           paidAmount,
+          payments:
+            paidAmount > 0
+              ? [{ amount: paidAmount, method: paymentMethod }]
+              : [],
           notes,
           saleDate: new Date(),
         },
@@ -221,7 +291,7 @@ const createSale = async (req, res) => {
     );
 
     // --------------------------------------------------------
-    // 9. Commit transaction
+    // 10. Commit transaction
     // --------------------------------------------------------
 
     await session.commitTransaction();
@@ -388,11 +458,26 @@ const recordPayment = async (req, res) => {
       });
     }
 
-    // Never let paidAmount exceed the grand total.
-    sale.paidAmount = Math.min(sale.paidAmount + amount, sale.grandTotal);
+    // Payment method for this collection defaults to the sale's own method
+    // (callers can override, e.g. a cash settlement of a credit sale).
+    const method = req.body.method || sale.paymentMethod;
+    const note = (req.body.note || "").trim();
+
+    // Never let paidAmount exceed the grand total; record exactly what was
+    // added so the payment history always sums to paidAmount.
+    const added = Math.min(amount, remaining);
+
+    sale.paidAmount = sale.paidAmount + added;
 
     sale.paymentStatus =
       sale.paidAmount >= sale.grandTotal ? "Paid" : "Partial";
+
+    sale.payments.push({
+      amount: added,
+      method,
+      note,
+      receivedAt: new Date(),
+    });
 
     await sale.save();
 

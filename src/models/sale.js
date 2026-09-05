@@ -41,6 +41,39 @@ const saleItemSchema = new mongoose.Schema(
   },
 );
 
+// One entry per amount collected on the sale. The first entry is created
+// at sale time (if anything was paid), later entries are appended when
+// money owed on a partial/unpaid sale is received.
+const paymentRecordSchema = new mongoose.Schema(
+  {
+    amount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    method: {
+      type: String,
+      enum: ["Cash", "Card", "Bank Transfer", "eSewa", "Khalti", "Other"],
+      default: "Cash",
+    },
+
+    note: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    receivedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 const saleSchema = new mongoose.Schema(
   {
     businessId: {
@@ -110,6 +143,12 @@ const saleSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+
+    // History of every amount collected on this sale.
+    payments: {
+      type: [paymentRecordSchema],
+      default: [],
     },
 
     notes: {
