@@ -1,38 +1,29 @@
 import nodemailer from "nodemailer";
-import dns from "node:dns/promises";
 
-// Render (and many cloud hosts) have no IPv6 route. A normal DNS lookup can
-// return Gmail's IPv6 address, and connecting to it fails with
-// `connect ENETUNREACH <ipv6>:465 - Local (:::0)`.
-// Resolve smtp.gmail.com to an IPv4 address explicitly and connect to that,
-// keeping the TLS certificate name as smtp.gmail.com via `tls.servername`.
-let smtpHost = "smtp.gmail.com";
-try {
-  const ipv4 = await dns.resolve4("smtp.gmail.com");
-  if (ipv4 && ipv4.length > 0) {
-    smtpHost = ipv4[0];
-  }
-} catch {
-  // Keep the default hostname; resolution will be retried by the runtime.
-}
-
-// Create a transporter using Gmail SMTP over IPv4.
-// Timeouts keep sendMail from hanging for minutes when Gmail is slow
-// or unreachable (common from cloud hosts like Render).
+// Render (and many cloud hosts) have no IPv6 route — the app already sets
+// dns.setDefaultResultOrder("ipv4first") in src/config/env.js, so the
+// hostname resolves to IPv4 automatically. Do NOT pin one resolved IP here:
+// Gmail rotates its SMTP backends and a pinned address can be throttled,
+// causing "Connection timeout" for everyone behind a datacenter IP.
+//
+// Use port 587 + STARTTLS (not 465 implicit TLS) which is the most broadly
+// reachable Gmail path, and generous timeouts because Gmail can stall
+// connections from cloud IPs for a while before accepting.
 const transportor = nodemailer.createTransport({
-  host: smtpHost,
-  port: 465,
-  secure: true,
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_APP_PASS,
   },
+  connectionTimeout: 60000,
+  greetingTimeout: 60000,
+  socketTimeout: 60000,
   tls: {
+    // Keep cert validation for smtp.gmail.com under STARTTLS.
     servername: "smtp.gmail.com",
   },
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
-  socketTimeout: 20000,
 });
 
 // Build the public base URL for verification links.
