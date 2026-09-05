@@ -1,17 +1,38 @@
 import nodemailer from "nodemailer";
+import dns from "node:dns/promises";
 
-// Create a transporter using Gmail SMTP.
+// Render (and many cloud hosts) have no IPv6 route. A normal DNS lookup can
+// return Gmail's IPv6 address, and connecting to it fails with
+// `connect ENETUNREACH <ipv6>:465 - Local (:::0)`.
+// Resolve smtp.gmail.com to an IPv4 address explicitly and connect to that,
+// keeping the TLS certificate name as smtp.gmail.com via `tls.servername`.
+let smtpHost = "smtp.gmail.com";
+try {
+  const ipv4 = await dns.resolve4("smtp.gmail.com");
+  if (ipv4 && ipv4.length > 0) {
+    smtpHost = ipv4[0];
+  }
+} catch {
+  // Keep the default hostname; resolution will be retried by the runtime.
+}
+
+// Create a transporter using Gmail SMTP over IPv4.
 // Timeouts keep sendMail from hanging for minutes when Gmail is slow
 // or unreachable (common from cloud hosts like Render).
 const transportor = nodemailer.createTransport({
-  service: "gmail",
+  host: smtpHost,
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_APP_PASS,
   },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
+  tls: {
+    servername: "smtp.gmail.com",
+  },
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 20000,
 });
 
 // Build the public base URL for verification links.
