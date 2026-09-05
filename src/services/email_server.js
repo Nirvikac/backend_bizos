@@ -43,11 +43,12 @@ const sendVerificationEmail = async (email, verificationToken, req = null) => {
   const baseUrl = getVerificationBaseUrl(req);
   const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
 
-  await transportor.sendMail({
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject: "Email Verification",
-    html: `
+  try {
+    const info = await transportor.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Email Verification",
+      html: `
       <div style="
         font-family: Arial, sans-serif;
         max-width: 600px;
@@ -80,6 +81,19 @@ const sendVerificationEmail = async (email, verificationToken, req = null) => {
         </p>
       </div>
     `,
-  });
+    });
+
+    console.log(
+      `[EMAIL OK] verification email accepted by Gmail -> ${email} (messageId: ${info.messageId})`,
+    );
+  } catch (error) {
+    console.error(
+      `[EMAIL FAILED] verification email NOT sent -> ${email}. Reason: ${error.message}`,
+    );
+    if (error.responseCode) {
+      console.error(`[EMAIL FAILED] SMTP response code: ${error.responseCode}`);
+    }
+    throw error;
+  }
 };
 export { sendVerificationEmail };
