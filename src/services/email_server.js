@@ -1,15 +1,19 @@
 import nodemailer from "nodemailer";
 
-// Render (and many cloud hosts) have no IPv6 route — the app already sets
-// dns.setDefaultResultOrder("ipv4first") in src/config/env.js, so the
-// hostname resolves to IPv4 automatically. Do NOT pin one resolved IP here:
-// Gmail rotates its SMTP backends and a pinned address can be throttled,
-// causing "Connection timeout" for everyone behind a datacenter IP.
+// ─────────────────────────────────────────────────────────────────────────────
+// Email sending
 //
-// Use port 587 + STARTTLS (not 465 implicit TLS) which is the most broadly
-// reachable Gmail path, and generous timeouts because Gmail can stall
-// connections from cloud IPs for a while before accepting.
-const transportor = nodemailer.createTransport({
+// Gmail SMTP is blocked/throttled from cloud/datacenter IPs (Render included),
+// which shows up as `connect ENETUNREACH <ipv6>` / `Connection timeout` at the
+// TCP level. The reliable path is an HTTPS transactional email API (port 443,
+// always reachable). This module prefers Resend; Gmail SMTP is kept as an
+// automatic fallback.
+//
+// To enable Resend, set RESEND_API_KEY (and optionally RESEND_FROM) in Render
+// env + local .env. Free tier of Resend = 100 emails/day.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const gmailTransporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 587,
   secure: false,
@@ -17,14 +21,55 @@ const transportor = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_APP_PASS,
   },
-  connectionTimeout: 60000,
-  greetingTimeout: 60000,
-  socketTimeout: 60000,
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 40000,
   tls: {
     // Keep cert validation for smtp.gmail.com under STARTTLS.
     servername: "smtp.gmail.com",
   },
 });
+
+// Send through Resend's HTTPS API (works from any cloud host).
+async function sendViaResend({ from, to, subject, html }) {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is not set");
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject,
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Resend API ${response.status}: ${body}`);
+  }
+
+  const data = await response.json();
+  return { messageId: data.id };
+}
+
+// Send through Gmail SMTP (fallback).
+async function sendViaGmail({ to, subject, html }) {
+  const info = await gmailTransporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to,
+    subject,
+    html,
+  });
+
+  return { messageId: info.messageId };
+}
 
 // Build the public base URL for verification links.
 // Prefers BACKEND_URL when it is a real public URL; otherwise falls back to
@@ -50,17 +95,7 @@ const getVerificationBaseUrl = (req) => {
   return "https://backend-bizos.onrender.com";
 };
 
-// Function to send email
-const sendVerificationEmail = async (email, verificationToken, req = null) => {
-  const baseUrl = getVerificationBaseUrl(req);
-  const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
-
-  try {
-    const info = await transportor.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Email Verification",
-      html: `
+const buildVerificationHtml = (verificationLink) => `
       <div style="
         font-family: Arial, sans-serif;
         max-width: 600px;
@@ -92,9 +127,33 @@ const sendVerificationEmail = async (email, verificationToken, req = null) => {
           This verification link will expire in 15 minutes.
         </p>
       </div>
-    `,
-    });
+    `;
 
+// Send the verification email. Tries Resend (HTTPS API) first, then falls
+// back to Gmail SMTP. Either way registration is never blocked.
+const sendVerificationEmail = async (email, verificationToken, req = null) => {
+  const baseUrl = getVerificationBaseUrl(req);
+  const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
+  const subject = "Email Verification";
+  const html = buildVerificationHtml(verificationLink);
+  const from = process.env.RESEND_FROM || process.env.EMAIL_USER;
+
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const info = await sendViaResend({ from, to: email, subject, html });
+      console.log(
+        `[EMAIL OK] verification email sent via Resend -> ${email} (id: ${info.messageId})`,
+      );
+      return;
+    } catch (error) {
+      console.error(
+        `[EMAIL WARN] Resend failed (${error.message}), falling back to Gmail SMTP -> ${email}`,
+      );
+    }
+  }
+
+  try {
+    const info = await sendViaGmail({ to: email, subject, html });
     console.log(
       `[EMAIL OK] verification email accepted by Gmail -> ${email} (messageId: ${info.messageId})`,
     );
@@ -108,4 +167,5 @@ const sendVerificationEmail = async (email, verificationToken, req = null) => {
     throw error;
   }
 };
-export { sendVerificationEmail };
+
+export { sendVerificationEmail };
