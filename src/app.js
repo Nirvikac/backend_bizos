@@ -26,4 +26,39 @@ app.use("/api/inventory", inventoryRoutes);
 app.use("/api/sales", saleRouter);
 app.use("/api/customers", customerRouter);
 app.use("/api/expenses", expenseRouter);
+
+// --------------------------------------------------------------
+// Global error handler — keeps multer/upload errors as clean JSON
+// --------------------------------------------------------------
+app.use((error, req, res, next) => {
+  console.error("Unhandled Error:", error);
+
+  // Multer errors (file too large, too many files, wrong field, bad type)
+  if (error?.name === "MulterError") {
+    const messages = {
+      LIMIT_FILE_SIZE: "Each image must be 5 MB or smaller",
+      LIMIT_FILE_COUNT: "A product can have at most 5 images",
+      LIMIT_UNEXPECTED_FILE: "Only JPG, PNG, WEBP and GIF images are allowed",
+    };
+
+    return res.status(400).json({
+      success: false,
+      message: messages[error.code] || `Upload error: ${error.code}`,
+    });
+  }
+
+  // Malformed multipart/form-data bodies
+  if (error?.type === "entity.parse.failed" || error?.status === 400) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid request body",
+    });
+  }
+
+  return res.status(error?.status || 500).json({
+    success: false,
+    message: error?.message || "Internal server error",
+  });
+});
+
 export default app;

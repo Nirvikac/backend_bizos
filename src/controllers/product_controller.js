@@ -1,5 +1,9 @@
 import Product from "../models/product_schema.js";
 import businessDetail from "../models/business_detail_schema.js";
+import {
+  uploadImages,
+  deleteRemovedImages,
+} from "../services/cloudinary.service.js";
 
 // ============================================================
 // CREATE PRODUCT
@@ -17,7 +21,6 @@ export const createProduct = async (req, res) => {
       sellingPrice,
       costPrice,
       unit,
-      images,
     } = req.body;
 
     // --------------------------------------------------------
@@ -63,6 +66,16 @@ export const createProduct = async (req, res) => {
     }
 
     // --------------------------------------------------------
+    // Upload images to Cloudinary (from multer memory storage)
+    // --------------------------------------------------------
+
+    let images = [];
+
+    if (req.files?.length) {
+      images = await uploadImages(req.files);
+    }
+
+    // --------------------------------------------------------
     // Create product
     // --------------------------------------------------------
 
@@ -75,7 +88,7 @@ export const createProduct = async (req, res) => {
       sellingPrice,
       costPrice: costPrice ?? 0,
       unit: unit?.trim() || "piece",
-      images: images || [],
+      images,
     });
 
     return res.status(201).json({
@@ -224,7 +237,7 @@ export const updateProduct = async (req, res) => {
       sellingPrice,
       costPrice,
       unit,
-      images,
+      removeImageIds,
     } = req.body;
 
     // --------------------------------------------------------
@@ -280,7 +293,39 @@ export const updateProduct = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // Update fields
+    // Handle images:
+    // 1. Delete removed images (by publicId) from Cloudinary
+    // 2. Upload newly added files
+    // --------------------------------------------------------
+
+    let nextImages = [...product.images];
+
+    // 1. Remove images the client asked to delete
+    //    Accepts a JSON array or a comma-separated string of publicIds
+    if (removeImageIds !== undefined) {
+      let removedIds = [];
+
+      if (Array.isArray(removeImageIds)) {
+        removedIds = removeImageIds;
+      } else if (typeof removeImageIds === "string" && removeImageIds.trim()) {
+        removedIds = removeImageIds.split(",").map((id) => id.trim());
+      }
+
+      if (removedIds.length) {
+        nextImages = nextImages.filter(
+          (img) => !removedIds.includes(img.publicId),
+        );
+      }
+    }
+
+    // 2. Upload new files and append
+    if (req.files?.length) {
+      const uploadedImages = await uploadImages(req.files);
+      nextImages.push(...uploadedImages);
+    }
+
+    // --------------------------------------------------------
+    // Update text fields
     // --------------------------------------------------------
 
     if (name !== undefined) {
@@ -307,11 +352,24 @@ export const updateProduct = async (req, res) => {
       product.unit = unit.trim();
     }
 
-    if (images !== undefined) {
-      product.images = images;
-    }
+    // --------------------------------------------------------
+    // Persist image changes, then clean up Cloudinary for
+    // images that were dropped (DB is the source of truth)
+    // --------------------------------------------------------
 
-    await product.save();
+    if (
+      removeImageIds !== undefined ||
+      req.files?.length
+    ) {
+      const oldImages = [...product.images];
+
+      product.images = nextImages;
+      await product.save();
+
+      await deleteRemovedImages(oldImages, nextImages);
+    } else {
+      await product.save();
+    }
 
     return res.status(200).json({
       success: true,
@@ -377,7 +435,8 @@ export const deleteProduct = async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // Soft delete
+    // Soft delete — keep Cloudinary images intact so the
+    // product can be restored with its images in the future
     // --------------------------------------------------------
 
     product.isActive = false;

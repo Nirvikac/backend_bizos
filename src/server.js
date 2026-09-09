@@ -1,6 +1,5 @@
 // 1. MUST BE FIRST: Load env variables before everything else
 import "./config/env.js";
-
 // 2. Now import code that relies on those environment variables
 import app from "../src/app.js";
 import dbConnect from "./config/db.js";
