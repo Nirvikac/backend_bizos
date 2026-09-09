@@ -1,4 +1,7 @@
-import cloudinary from "../config/cloudinary.js";
+import cloudinary, {
+  isCloudinaryConfigured,
+  getMissingCloudinaryEnvVars,
+} from "../config/cloudinary.js";
 
 // ------------------------------------------------------------
 // Constants
@@ -13,6 +16,13 @@ const ALLOWED_FORMATS = ["jpg", "jpeg", "png", "webp", "gif"];
 // ------------------------------------------------------------
 
 export const uploadImage = async (buffer, originalName = "image") => {
+  // Fail with an actionable message instead of a cryptic SDK error
+  if (!isCloudinaryConfigured()) {
+    throw new Error(
+      `Cloudinary is not configured on this server. Missing env vars: ${getMissingCloudinaryEnvVars().join(", ")}`,
+    );
+  }
+
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
