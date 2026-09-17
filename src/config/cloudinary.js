@@ -1,9 +1,8 @@
 import { v2 as cloudinary } from "cloudinary";
 
-// ------------------------------------------------------------
-// Required environment variables
-// ------------------------------------------------------------
-
+// Cloudinary credentials are optional at boot (the server can still serve
+// non-image routes), but uploading without them must fail with a message
+// that says exactly what to set.
 const CLOUDINARY_ENV_VARS = [
   "CLOUDINARY_CLOUD_NAME",
   "CLOUDINARY_API_KEY",
@@ -16,12 +15,6 @@ export const getMissingCloudinaryEnvVars = () =>
 export const isCloudinaryConfigured = () =>
   getMissingCloudinaryEnvVars().length === 0;
 
-// ------------------------------------------------------------
-// Configure the SDK only when every variable exists.
-// (Passing undefined values used to cause "Must supply api_key"
-// errors deep inside Cloudinary instead of a clear startup error.)
-// ------------------------------------------------------------
-
 if (isCloudinaryConfigured()) {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -30,8 +23,8 @@ if (isCloudinaryConfigured()) {
   });
 } else {
   console.warn(
-    `[cloudinary] NOT CONFIGURED — missing environment variables: ${getMissingCloudinaryEnvVars().join(", ")}. ` +
-      "Product image upload will fail until these are set (Render Dashboard → Environment).",
+    `[cloudinary] NOT CONFIGURED — missing env vars: ${getMissingCloudinaryEnvVars().join(", ")}. ` +
+      "Product image upload will fail until these are set.",
   );
 }
 

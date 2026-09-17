@@ -1,12 +1,15 @@
 import mongoose from "mongoose";
 
+// Single entry point for the Mongo connection. The app refuses to start
+// without a database — every route depends on it, so there is nothing
+// useful we could do in a degraded state.
 async function dbConnect() {
   try {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("Database connected");
   } catch (error) {
-    console.log("Connection Failed" + error);
-    process.exit(1); // Optional: Stop app if database connection fails
+    console.error("Database connection failed:", error.message);
+    process.exit(1);
   }
 }
 

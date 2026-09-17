@@ -9,6 +9,7 @@ const businessDetailSchema = new mongoose.Schema({
   organizationName: {
     type: String,
     required: true,
+    trim: true,
   },
   businessType: {
     type: String,
@@ -23,28 +24,33 @@ const businessDetailSchema = new mongoose.Schema({
   businessPhone: {
     type: String,
     required: true,
+    trim: true,
   },
   businessEmail: {
     type: String,
     required: true,
+    trim: true,
   },
-
   businessAddress: {
     type: String,
     required: true,
+    trim: true,
   },
   currency: {
     type: String,
     required: true,
     enum: ["NPR", "USD", "EUR", "INR"],
   },
+  // Tax registration is optional — not every shop has one.
   panNumber: {
     type: String,
-    required: false,
+    trim: true,
+    default: "",
   },
   vatNumber: {
     type: String,
-    required: false,
+    trim: true,
+    default: "",
   },
   createdAt: {
     type: Date,
@@ -52,9 +58,9 @@ const businessDetailSchema = new mongoose.Schema({
   },
 });
 
-//indexxing the ownerId field for faster queries
+// Every business-scoped query starts from the owner.
 businessDetailSchema.index({ ownerId: 1 });
-businessDetailSchema.index({ organizationName: 1 });
 
-const businessDetail = mongoose.model("BusinessDetail", businessDetailSchema);
-export default businessDetail;
+const BusinessDetail = mongoose.model("BusinessDetail", businessDetailSchema);
+
+export default BusinessDetail;

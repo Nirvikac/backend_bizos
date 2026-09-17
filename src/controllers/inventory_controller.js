@@ -1,34 +1,36 @@
 import Inventory from "../models/inventory_model.js";
 import Product from "../models/product_schema.js";
-import businessDetail from "../models/business_detail_schema.js";
+import getOwnedBusiness from "../utils/getOwnedBusiness.js";
 
-// ============================================================
-// CREATE INVENTORY
-// ============================================================
+// Fields exposed when a product is embedded into an inventory response.
+const PRODUCT_FIELDS = "name sku category sellingPrice costPrice unit images";
+
+// A deleted product populates as null — its inventory is hidden from
+// normal listings but the stock record stays for historical sales.
+const isActiveInventory = (inv) => inv.productId != null;
+
+const findBusinessInventory = (businessId, inventoryId) =>
+  Inventory.findOne({ _id: inventoryId, businessId });
 
 export const createInventory = async (req, res) => {
   try {
     const { productId, quantity, lowStockThreshold } = req.body;
 
     if (!productId) {
-      return res.status(400).json({
-        success: false,
-        message: "Product ID is required",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Product ID is required" });
     }
 
-    const business = await businessDetail.findOne({
-      ownerId: req.user.id,
-    });
+    const business = await getOwnedBusiness(req.user.id);
 
     if (!business) {
-      return res.status(404).json({
-        success: false,
-        message: "Business not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Business not found" });
     }
 
-    // Make sure product belongs to this business
+    // Inventory can only be created for a product that's still live.
     const product = await Product.findOne({
       _id: productId,
       businessId: business._id,
@@ -36,19 +38,18 @@ export const createInventory = async (req, res) => {
     });
 
     if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
     }
 
-    // Prevent duplicate inventory
-    const existingInventory = await Inventory.findOne({
+    // One stock record per product — the unique index also enforces this.
+    const existing = await Inventory.findOne({
       businessId: business._id,
       productId,
     });
 
-    if (existingInventory) {
+    if (existing) {
       return res.status(409).json({
         success: false,
         message: "Inventory already exists for this product",
@@ -69,29 +70,20 @@ export const createInventory = async (req, res) => {
     });
   } catch (error) {
     console.error("Create inventory error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create inventory",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to create inventory" });
   }
 };
 
-// ============================================================
-// GET ALL INVENTORY
-// ============================================================
-
 export const getInventories = async (req, res) => {
   try {
-    const business = await businessDetail.findOne({
-      ownerId: req.user.id,
-    });
+    const business = await getOwnedBusiness(req.user.id);
 
     if (!business) {
-      return res.status(404).json({
-        success: false,
-        message: "Business not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Business not found" });
     }
 
     const inventories = await Inventory.find({
@@ -100,13 +92,11 @@ export const getInventories = async (req, res) => {
       .populate({
         path: "productId",
         match: { isActive: true },
-        select: "name sku category sellingPrice costPrice unit images",
+        select: PRODUCT_FIELDS,
       })
       .lean();
 
-    // Hide inventory whose product has been deleted (inactive).
-    // Stock records themselves are kept so existing sales are never affected.
-    const activeInventories = inventories.filter((inv) => inv.productId != null);
+    const activeInventories = inventories.filter(isActiveInventory);
 
     return res.status(200).json({
       success: true,
@@ -115,31 +105,22 @@ export const getInventories = async (req, res) => {
     });
   } catch (error) {
     console.error("Get inventories error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch inventories",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch inventories" });
   }
 };
-
-// ============================================================
-// GET INVENTORY BY PRODUCT
-// ============================================================
 
 export const getInventoryByProduct = async (req, res) => {
   try {
     const { productId } = req.params;
 
-    const business = await businessDetail.findOne({
-      ownerId: req.user.id,
-    });
+    const business = await getOwnedBusiness(req.user.id);
 
     if (!business) {
-      return res.status(404).json({
-        success: false,
-        message: "Business not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Business not found" });
     }
 
     const inventory = await Inventory.findOne({
@@ -148,69 +129,50 @@ export const getInventoryByProduct = async (req, res) => {
     }).populate({
       path: "productId",
       match: { isActive: true },
-      select: "name sku category sellingPrice costPrice unit images",
+      select: PRODUCT_FIELDS,
     });
 
-    // Product was deleted — hide its inventory too.
-    if (!inventory || inventory.productId == null) {
-      return res.status(404).json({
-        success: false,
-        message: "Inventory not found",
-      });
+    if (!inventory || !isActiveInventory(inventory)) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Inventory not found" });
     }
 
-    return res.status(200).json({
-      success: true,
-      inventory,
-    });
+    return res.status(200).json({ success: true, inventory });
   } catch (error) {
     console.error("Get inventory error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch inventory",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch inventory" });
   }
 };
-
-// ============================================================
-// UPDATE INVENTORY
-// ============================================================
 
 export const updateInventory = async (req, res) => {
   try {
     const { inventoryId } = req.params;
     const { quantity, lowStockThreshold } = req.body;
 
-    const business = await businessDetail.findOne({
-      ownerId: req.user.id,
-    });
+    const business = await getOwnedBusiness(req.user.id);
 
     if (!business) {
-      return res.status(404).json({
-        success: false,
-        message: "Business not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Business not found" });
     }
 
-    const inventory = await Inventory.findOne({
-      _id: inventoryId,
-      businessId: business._id,
-    });
+    const inventory = await findBusinessInventory(business._id, inventoryId);
 
     if (!inventory) {
-      return res.status(404).json({
-        success: false,
-        message: "Inventory not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Inventory not found" });
     }
 
     if (quantity !== undefined) {
       if (quantity < 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Quantity cannot be negative",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Quantity cannot be negative" });
       }
 
       inventory.quantity = quantity;
@@ -229,10 +191,9 @@ export const updateInventory = async (req, res) => {
 
     await inventory.save();
 
-    const updatedInventory = await Inventory.findById(inventory._id).populate(
-      "productId",
-      "name sku category sellingPrice costPrice unit images",
-    );
+    const updatedInventory = await Inventory.findById(
+      inventory._id,
+    ).populate("productId", PRODUCT_FIELDS);
 
     return res.status(200).json({
       success: true,
@@ -241,10 +202,8 @@ export const updateInventory = async (req, res) => {
     });
   } catch (error) {
     console.error("Update inventory error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update inventory",
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to update inventory" });
   }
 };

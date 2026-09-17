@@ -1,39 +1,45 @@
 import mongoose from "mongoose";
 
-const customerSchema = new mongoose.Schema({
-  businessId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "BusinessDetail",
-    required: true,
-  },
-  name: {
-    type: String,
-    required: true,
-    trim: true,
-  },
-  phone: {
-    type: String,
-    trim: true,
-    default: "",
-  },
-  email: {
-    type: String,
-    trim: true,
-    default: "",
-  },
-  address: {
-    type: String,
-    trim: true,
-    default: "",
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+const customerSchema = new mongoose.Schema(
+  {
+    businessId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessDetail",
+      required: true,
+    },
 
-// Faster lookups: customers belong to one business
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    phone: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    email: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    address: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+  },
+  {
+    timestamps: true,
+  },
+);
+
 customerSchema.index({ businessId: 1 });
+
+// The till matches walk-in customers by phone first.
 customerSchema.index({ businessId: 1, phone: 1 });
 
 const Customer = mongoose.model("Customer", customerSchema);
