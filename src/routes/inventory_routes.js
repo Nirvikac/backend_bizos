@@ -5,7 +5,6 @@ import {
   getInventories,
   getInventoryByProduct,
   updateInventory,
-  deleteInventory,
 } from "../controllers/inventory_controller.js";
 
 import { authMiddleware } from "../middlewares/auth_middleware.js";
@@ -23,7 +22,5 @@ inventoryRouter.get(
 );
 
 inventoryRouter.put("/:inventoryId", authMiddleware, updateInventory);
-
-inventoryRouter.delete("/:inventoryId", authMiddleware, deleteInventory);
 
 export default inventoryRouter;

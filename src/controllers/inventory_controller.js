@@ -96,15 +96,22 @@ export const getInventories = async (req, res) => {
 
     const inventories = await Inventory.find({
       businessId: business._id,
-    }).populate(
-      "productId",
-      "name sku category sellingPrice costPrice unit images",
-    );
+    })
+      .populate({
+        path: "productId",
+        match: { isActive: true },
+        select: "name sku category sellingPrice costPrice unit images",
+      })
+      .lean();
+
+    // Hide inventory whose product has been deleted (inactive).
+    // Stock records themselves are kept so existing sales are never affected.
+    const activeInventories = inventories.filter((inv) => inv.productId != null);
 
     return res.status(200).json({
       success: true,
-      count: inventories.length,
-      inventories,
+      count: activeInventories.length,
+      inventories: activeInventories,
     });
   } catch (error) {
     console.error("Get inventories error:", error);
@@ -138,12 +145,14 @@ export const getInventoryByProduct = async (req, res) => {
     const inventory = await Inventory.findOne({
       businessId: business._id,
       productId,
-    }).populate(
-      "productId",
-      "name sku category sellingPrice costPrice unit images",
-    );
+    }).populate({
+      path: "productId",
+      match: { isActive: true },
+      select: "name sku category sellingPrice costPrice unit images",
+    });
 
-    if (!inventory) {
+    // Product was deleted — hide its inventory too.
+    if (!inventory || inventory.productId == null) {
       return res.status(404).json({
         success: false,
         message: "Inventory not found",
@@ -236,51 +245,6 @@ export const updateInventory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to update inventory",
-    });
-  }
-};
-
-// ============================================================
-// DELETE INVENTORY
-// ============================================================
-
-export const deleteInventory = async (req, res) => {
-  try {
-    const { inventoryId } = req.params;
-
-    const business = await businessDetail.findOne({
-      ownerId: req.user.id,
-    });
-
-    if (!business) {
-      return res.status(404).json({
-        success: false,
-        message: "Business not found",
-      });
-    }
-
-    const inventory = await Inventory.findOneAndDelete({
-      _id: inventoryId,
-      businessId: business._id,
-    });
-
-    if (!inventory) {
-      return res.status(404).json({
-        success: false,
-        message: "Inventory not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Inventory deleted successfully",
-    });
-  } catch (error) {
-    console.error("Delete inventory error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete inventory",
     });
   }
 };

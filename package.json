@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "verify:upload": "node scripts/verify-product-upload.mjs"
+    "verify:upload": "node scripts/verify-product-upload.mjs",
+    "backfill:product-units": "node scripts/backfill_product_units.mjs"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
