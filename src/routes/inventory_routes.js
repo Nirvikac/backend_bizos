@@ -4,6 +4,7 @@ import {
   createInventory,
   getInventories,
   getInventoryByProduct,
+  getStockMovements,
   updateInventory,
 } from "../controllers/inventory_controller.js";
 
@@ -22,5 +23,12 @@ inventoryRouter.get(
 );
 
 inventoryRouter.put("/:inventoryId", authMiddleware, updateInventory);
+
+// Stock history timeline for one inventory record.
+inventoryRouter.get(
+  "/:inventoryId/movements",
+  authMiddleware,
+  getStockMovements,
+);
 
 export default inventoryRouter;

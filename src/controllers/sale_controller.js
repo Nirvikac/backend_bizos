@@ -4,6 +4,7 @@ import Product from "../models/product_schema.js";
 import Inventory from "../models/inventory_model.js";
 import Customer from "../models/customer_schema.js";
 import getOwnedBusiness from "../utils/getOwnedBusiness.js";
+import recordStockMovement from "../utils/record_stock_movement.js";
 
 // Roll the transaction back and answer the client in one step, so no
 // early return inside createSale/cancelSale can leave a session open.
@@ -95,6 +96,28 @@ const createSale = async (req, res) => {
     }
 
     const { saleItems, subtotal } = result;
+
+    // Ledger: record every decrement so the stock timeline shows the sale.
+    for (const item of saleItems) {
+      const inv = await Inventory.findOne({
+        businessId: business._id,
+        productId: item.productId,
+      }).session(session);
+
+      if (inv) {
+        await recordStockMovement({
+          businessId: business._id,
+          inventoryId: inv._id,
+          productId: item.productId,
+          type: "sale",
+          change: -item.quantity,
+          resultQuantity: inv.quantity,
+          saleId: sale.id,
+          invoiceNumber,
+          session,
+        });
+      }
+    }
 
     const grandTotal = subtotal - discount + tax;
 
@@ -432,6 +455,19 @@ const cancelSale = async (req, res) => {
       if (inventory) {
         inventory.quantity += item.quantity;
         await inventory.save({ session });
+
+        // Ledger: the cancelled sale gives the stock back.
+        await recordStockMovement({
+          businessId: business._id,
+          inventoryId: inventory._id,
+          productId: item.productId,
+          type: "sale_cancelled",
+          change: item.quantity,
+          resultQuantity: inventory.quantity,
+          saleId: sale._id,
+          invoiceNumber: sale.invoiceNumber,
+          session,
+        });
       }
     }
 

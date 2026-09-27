@@ -1,6 +1,8 @@
 import Inventory from "../models/inventory_model.js";
 import Product from "../models/product_schema.js";
+import StockMovement from "../models/stock_movement_model.js";
 import getOwnedBusiness from "../utils/getOwnedBusiness.js";
+import recordStockMovement from "../utils/record_stock_movement.js";
 
 // Fields exposed when a product is embedded into an inventory response.
 const PRODUCT_FIELDS = "name sku category sellingPrice costPrice unit images";
@@ -62,6 +64,18 @@ export const createInventory = async (req, res) => {
       quantity: quantity ?? 0,
       lowStockThreshold: lowStockThreshold ?? 5,
     });
+
+    // Ledger: the starting stock level for this record.
+    if ((quantity ?? 0) > 0) {
+      await recordStockMovement({
+        businessId: business._id,
+        inventoryId: inventory._id,
+        productId,
+        type: "initial",
+        change: quantity ?? 0,
+        resultQuantity: quantity ?? 0,
+      });
+    }
 
     return res.status(201).json({
       success: true,
@@ -147,6 +161,63 @@ export const getInventoryByProduct = async (req, res) => {
   }
 };
 
+// ────────────────────────────────────────────────────────────
+// STOCK MOVEMENT LEDGER
+//
+// Append-only history of every stock change (sales, cancellations,
+// restocks, manual adjustments). Newest first, paginated — the app shows
+// this as a per-product stock timeline.
+// ────────────────────────────────────────────────────────────
+export const getStockMovements = async (req, res) => {
+  try {
+    const { inventoryId } = req.params;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+
+    const business = await getOwnedBusiness(req.user.id);
+
+    if (!business) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Business not found" });
+    }
+
+    // Scoped to the business so ids from other businesses return nothing.
+    const inventory = await findBusinessInventory(business._id, inventoryId);
+
+    if (!inventory) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Inventory not found" });
+    }
+
+    const query = { inventoryId: inventory._id };
+
+    const [movements, total] = await Promise.all([
+      StockMovement.find(query)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      StockMovement.countDocuments(query),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      count: movements.length,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      movements,
+    });
+  } catch (error) {
+    console.error("Get stock movements error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch stock movements" });
+  }
+};
+
 export const updateInventory = async (req, res) => {
   try {
     const { inventoryId } = req.params;
@@ -175,7 +246,25 @@ export const updateInventory = async (req, res) => {
           .json({ success: false, message: "Quantity cannot be negative" });
       }
 
+      // Ledger: manual edits are restock (up) or adjustment (down).
+      const previousQuantity = inventory.quantity;
       inventory.quantity = quantity;
+
+      const change = quantity - previousQuantity;
+      if (change !== 0) {
+        await recordStockMovement({
+          businessId: business._id,
+          inventoryId: inventory._id,
+          productId: inventory.productId,
+          type: change > 0 ? "restock" : "adjustment",
+          change,
+          resultQuantity: quantity,
+          note:
+            change > 0
+              ? "Stock added manually"
+              : "Stock removed manually",
+        });
+      }
     }
 
     if (lowStockThreshold !== undefined) {
