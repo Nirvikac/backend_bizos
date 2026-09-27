@@ -18,7 +18,7 @@ const createSale = async (req, res) => {
   try {
     session.startTransaction();
 
-    const {
+    let {
       items,
       customerId = null,
       customerName = "",
@@ -30,6 +30,18 @@ const createSale = async (req, res) => {
       paidAmount = 0,
       notes = "",
     } = req.body;
+
+    // Clients may send explicit `null` for optional fields — a walk-in sale
+    // has no customer, for example — which bypasses the destructuring
+    // defaults above (those only apply when the key is absent). Normalize so
+    // the rest of the handler never receives null where it expects a string
+    // or number.
+    customerName = customerName ?? "";
+    customerPhone = customerPhone ?? "";
+    notes = notes ?? "";
+    discount = Number(discount ?? 0);
+    tax = Number(tax ?? 0);
+    paidAmount = Number(paidAmount ?? 0);
 
     if (!Array.isArray(items) || items.length === 0) {
       return abortWith(session, res, 400, "Sale must contain at least one product");
@@ -129,6 +141,7 @@ const createSale = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to create sale",
+      error: error.message,
     });
   } finally {
     session.endSession();
