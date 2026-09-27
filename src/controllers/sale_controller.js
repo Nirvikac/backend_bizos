@@ -97,28 +97,6 @@ const createSale = async (req, res) => {
 
     const { saleItems, subtotal } = result;
 
-    // Ledger: record every decrement so the stock timeline shows the sale.
-    for (const item of saleItems) {
-      const inv = await Inventory.findOne({
-        businessId: business._id,
-        productId: item.productId,
-      }).session(session);
-
-      if (inv) {
-        await recordStockMovement({
-          businessId: business._id,
-          inventoryId: inv._id,
-          productId: item.productId,
-          type: "sale",
-          change: -item.quantity,
-          resultQuantity: inv.quantity,
-          saleId: sale.id,
-          invoiceNumber,
-          session,
-        });
-      }
-    }
-
     const grandTotal = subtotal - discount + tax;
 
     if (grandTotal < 0) {
@@ -149,6 +127,30 @@ const createSale = async (req, res) => {
       ],
       { session },
     );
+
+    // Ledger: record every decrement so the stock timeline shows the sale.
+    // Must run AFTER Sale.create — the entry carries sale.id. It stays
+    // inside the transaction, so an abort removes the entries too.
+    for (const item of saleItems) {
+      const inv = await Inventory.findOne({
+        businessId: business._id,
+        productId: item.productId,
+      }).session(session);
+
+      if (inv) {
+        await recordStockMovement({
+          businessId: business._id,
+          inventoryId: inv._id,
+          productId: item.productId,
+          type: "sale",
+          change: -item.quantity,
+          resultQuantity: inv.quantity,
+          saleId: sale[0]._id,
+          invoiceNumber,
+          session,
+        });
+      }
+    }
 
     await session.commitTransaction();
 
