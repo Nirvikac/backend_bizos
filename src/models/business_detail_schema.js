@@ -52,6 +52,18 @@ const businessDetailSchema = new mongoose.Schema({
     trim: true,
     default: "",
   },
+  // Payment QR (e-Sewa / Khalti / bank…) shown when customers pay the
+  // business. One QR per business — uploading replaces the previous one.
+  paymentQr: {
+    url: {
+      type: String,
+      default: "",
+    },
+    publicId: {
+      type: String,
+      default: "",
+    },
+  },
   createdAt: {
     type: Date,
     default: Date.now,

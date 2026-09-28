@@ -48,4 +48,8 @@ const upload = multer({
 // Accept up to 5 images from the "images" field (multipart/form-data)
 export const uploadProductImages = upload.array("images", MAX_IMAGES);
 
+// Accept exactly one image from the "qr" field (multipart/form-data).
+// Used for the business payment QR — a new upload replaces the old one.
+export const uploadQrImage = upload.single("qr");
+
 export default uploadProductImages;

@@ -8,6 +8,9 @@ import cloudinary, {
 // ------------------------------------------------------------
 
 const FOLDER = "bizos/products";
+const QR_FOLDER = "bizos/payment-qr";
+// One QR per business — a fixed publicId makes re-uploads overwrite.
+const QR_PUBLIC_ID = "payment-qr";
 const ALLOWED_FORMATS = ["jpg", "jpeg", "png", "webp", "gif"];
 
 // ------------------------------------------------------------
@@ -37,6 +40,46 @@ export const uploadImage = async (buffer, originalName = "image") => {
         if (error || !result) {
           return reject(
             new Error(error?.message || "Cloudinary upload failed"),
+          );
+        }
+
+        resolve({
+          url: result.secure_url,
+          publicId: result.public_id,
+        });
+      },
+    );
+
+    stream.end(buffer);
+  });
+};
+
+// ------------------------------------------------------------
+// Upload the business payment QR. Stored in its own folder with a
+// stable publicId so re-uploads overwrite instead of accumulating.
+// ------------------------------------------------------------
+
+export const uploadQrImage = async (buffer) => {
+  if (!isCloudinaryConfigured()) {
+    throw new Error(
+      `Cloudinary is not configured on this server. Missing env vars: ${getMissingCloudinaryEnvVars().join(", ")}`,
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: QR_FOLDER,
+        resource_type: "image",
+        public_id: QR_PUBLIC_ID,
+        overwrite: true,
+        invalidate: true,
+        allowed_formats: ALLOWED_FORMATS,
+      },
+      (error, result) => {
+        if (error || !result) {
+          return reject(
+            new Error(error?.message || "Cloudinary QR upload failed"),
           );
         }
 
