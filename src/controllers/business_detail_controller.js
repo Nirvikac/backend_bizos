@@ -134,7 +134,11 @@ const uploadPaymentQr = async (req, res) => {
     await business.save();
 
     // Only remove the old asset after the new one is safely saved.
-    if (previous) {
+    // The QR uses a fixed publicId with overwrite:true, so the old and
+    // new uploads are the SAME Cloudinary resource — deleting the
+    // "previous" publicId would destroy the image we just uploaded.
+    // Only clean up when the id actually changed.
+    if (previous && previous.publicId !== uploaded.publicId) {
       await deleteImage(previous.publicId);
     }
 
