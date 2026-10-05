@@ -29,9 +29,8 @@ const sendEmailInBackground = (user, token) => {
 };
 
 const registerUser = async (req, res) => {
-  const { username, email, password } = req.body;
-
   try {
+    const { username, email, password } = req.body || {};
     // Validate the password before touching the DB so a weak password
     // gets a validation error even when the email is already taken.
     if (!password || password.length < 6) {
@@ -101,9 +100,14 @@ const registerUser = async (req, res) => {
 };
 
 const loginUser = async (req, res) => {
-  const { email, password } = req.body;
-
   try {
+    const { email, password } = req.body || {};
+
+    if (!email || !password) {
+      return res.status(400).json({
+        message: "Email and password are required",
+      });
+    }
     const user = await User.findOne({ email });
 
     if (!user) {
