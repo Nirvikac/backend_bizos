@@ -1,8 +1,9 @@
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
-// Fallback keeps the sender valid even if RESEND_FROM is not set on the
-// host (the Resend sandbox address only delivers to the account owner).
-const FROM_EMAIL = process.env.RESEND_FROM || "onboarding@resend.dev";
+// Fallback uses the verified domain (nirvikacharya.com.np) so the sender is
+// deliverable to any recipient even if RESEND_FROM is missing on the host.
+// The old fallback (onboarding@resend.dev) only delivers to the account owner.
+const FROM_EMAIL = process.env.RESEND_FROM || "noreply@nirvikacharya.com.np";
 
 const buildVerificationHtml = (verificationLink) => `
   <h2>Welcome to Bizos 👋</h2>

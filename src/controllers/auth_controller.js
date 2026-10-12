@@ -232,8 +232,9 @@ const forgotPassword = async (req, res) => {
     const token = buildPasswordResetToken(user);
     await user.save();
 
-    // Resolve the frontend origin: an explicit config wins, otherwise reuse
-    // the Origin header of the request (works for localhost dev and any host).
+    // Resolve the frontend origin: an explicit FRONTEND_URL env var wins, then
+    // the request's Origin header (covers localhost dev and any deployed host),
+    // and localhost last for server-to-server calls from curl during dev.
     const frontendBase =
       process.env.FRONTEND_URL || req.get("origin") || "http://localhost:3000";
 
