@@ -2,19 +2,46 @@ import User from "../models/user_schema.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import generateToken from "../utils/jwt.js";
-import { sendVerificationEmail } from "../services/email_server.js";
+import {
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+} from "../services/email_server.js";
 
 const VERIFICATION_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const PASSWORD_RESET_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 // Tokens are stored hashed — a DB leak then can't be replayed to verify.
 const hashToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
+
+// Shared password policy so register and reset can never drift apart.
+const validatePassword = (password) => {
+  if (!password || password.length < 6) {
+    return "Password must be at least 6 characters long";
+  }
+
+  if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[#@$!%*?&])/.test(password)) {
+    return "Password must include at least one uppercase letter, one lowercase letter, one number, and one special character";
+  }
+
+  return null;
+};
 
 const buildVerificationToken = (user) => {
   const token = crypto.randomBytes(32).toString("hex");
 
   user.emailVerificationToken = hashToken(token);
   user.emailVerificationTokenExpiry = Date.now() + VERIFICATION_TOKEN_TTL_MS;
+
+  // The plain token only ever exists here — it goes out in the email.
+  return token;
+};
+
+const buildPasswordResetToken = (user) => {
+  const token = crypto.randomBytes(32).toString("hex");
+
+  user.passwordResetToken = hashToken(token);
+  user.passwordResetTokenExpiry = Date.now() + PASSWORD_RESET_TOKEN_TTL_MS;
 
   // The plain token only ever exists here — it goes out in the email.
   return token;
@@ -33,17 +60,9 @@ const registerUser = async (req, res) => {
     const { username, email, password } = req.body || {};
     // Validate the password before touching the DB so a weak password
     // gets a validation error even when the email is already taken.
-    if (!password || password.length < 6) {
-      return res.status(400).json({
-        message: "Password must be at least 6 characters long",
-      });
-    }
-
-    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[#@$!%*?&])/.test(password)) {
-      return res.status(400).json({
-        message:
-          "Password must include at least one uppercase letter, one lowercase letter, one number, and one special character",
-      });
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const existingUser = await User.findOne({ email });
@@ -187,4 +206,101 @@ const verifyEmail = async (req, res) => {
   }
 };
 
-export { registerUser, loginUser, verifyEmail };
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body || {};
+
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
+
+    // Always answer the same way so this endpoint can't be used to discover
+    // which emails are registered.
+    const genericResponse = {
+      message:
+        "If an account with that email exists, we've sent a password reset link.",
+    };
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(200).json(genericResponse);
+    }
+
+    const token = buildPasswordResetToken(user);
+    await user.save();
+
+    // Resolve the frontend origin: an explicit config wins, otherwise reuse
+    // the Origin header of the request (works for localhost dev and any host).
+    const frontendBase =
+      process.env.FRONTEND_URL || req.get("origin") || "http://localhost:3000";
+
+    // Email sending happens in the background so a slow SMTP provider can
+    // never delay the HTTP response.
+    sendPasswordResetEmail(user.email, token, frontendBase).catch((error) => {
+      console.error("Password reset email failed:", error.message);
+    });
+
+    return res.status(200).json(genericResponse);
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    return res.status(500).json({
+      message: "Error processing password reset request",
+    });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+
+    if (!token || !password) {
+      return res.status(400).json({
+        message: "Reset link token and new password are required",
+      });
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
+    }
+
+    const user = await User.findOne({
+      passwordResetToken: hashToken(token),
+      passwordResetTokenExpiry: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        message: "Invalid or expired reset link. Please request a new one.",
+      });
+    }
+
+    user.password = await bcrypt.hash(password, 10);
+
+    // Single-use — clear the token so the link can't be reused.
+    user.passwordResetToken = null;
+    user.passwordResetTokenExpiry = null;
+
+    await user.save();
+
+    return res.status(200).json({
+      message: "Password reset successfully. You can now log in.",
+    });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    return res.status(500).json({
+      message: "Error resetting password",
+    });
+  }
+};
+
+export {
+  registerUser,
+  loginUser,
+  verifyEmail,
+  forgotPassword,
+  resetPassword,
+};

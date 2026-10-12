@@ -51,4 +51,52 @@ const sendVerificationEmail = async (email, verificationToken) => {
   console.log("Verification email sent:", id);
 };
 
-export { sendVerificationEmail };
+const buildResetHtml = (resetLink) => `
+  <h2>Reset your Bizos password</h2>
+  <p>We received a request to reset the password for your Bizos account.</p>
+  <a
+    href="${resetLink}"
+    style="
+      display:inline-block;
+      padding:12px 24px;
+      background:#2563eb;
+      color:white;
+      text-decoration:none;
+      border-radius:8px;
+    "
+  >
+    Reset Password
+  </a>
+  <p>This link will expire in 15 minutes.</p>
+  <p>If you didn't request this, you can safely ignore this email — your password won't change.</p>
+`;
+
+const sendPasswordResetEmail = async (email, resetToken, frontendBase) => {
+  const base = (frontendBase || "http://localhost:3000").replace(/\/+$/, "");
+  const resetLink = `${base}/reset-password?token=${resetToken}`;
+
+  const response = await fetch(RESEND_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: `Bizos <${FROM_EMAIL}>`,
+      to: [email],
+      subject: "Reset your Bizos password",
+      html: buildResetHtml(resetLink),
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    console.error("Password reset email failed:", body);
+    throw new Error(`Resend responded with ${response.status}`);
+  }
+
+  const { id } = await response.json();
+  console.log("Password reset email sent:", id);
+};
+
+export { sendVerificationEmail, sendPasswordResetEmail };

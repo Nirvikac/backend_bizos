@@ -34,6 +34,18 @@ const userSchema = new mongoose.Schema({
     default: null,
   },
 
+  // Password reset uses its own hashed single-use token, kept separate from
+  // email verification so the two flows can never clobber each other.
+  passwordResetToken: {
+    type: String,
+    default: null,
+  },
+
+  passwordResetTokenExpiry: {
+    type: Date,
+    default: null,
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,
