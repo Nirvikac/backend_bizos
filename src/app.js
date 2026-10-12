@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 
 // Register mongoose models referenced by other schemas (Sale → Customer)
 // before any route/controller code that populates them runs.
@@ -14,6 +15,9 @@ import expenseRouter from "./routes/expense_routes.js";
 
 const app = express();
 
+// Public API: browsers register/login from other origins (nirvik_pro,
+// localhost dev). Without this, preflighted JSON requests are blocked.
+app.use(cors());
 app.use(express.json());
 
 // ── API routes ──────────────────────────────────────────────
