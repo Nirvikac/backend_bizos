@@ -47,10 +47,16 @@ const buildPasswordResetToken = (user) => {
   return token;
 };
 
+// Resolve the frontend origin shared by verification and reset emails: an
+// explicit FRONTEND_URL env var wins, then the request's Origin header
+// (covers localhost dev and any deployed host), and localhost last.
+const resolveFrontendBase = (req) =>
+  process.env.FRONTEND_URL || req.get("origin") || "http://localhost:3000";
+
 // Email sending happens in the background so a slow SMTP provider can
 // never delay the HTTP response.
-const sendEmailInBackground = (user, token) => {
-  sendVerificationEmail(user.email, token).catch((error) => {
+const sendEmailInBackground = (user, token, frontendBase) => {
+  sendVerificationEmail(user.email, token, frontendBase).catch((error) => {
     console.error("Verification email failed:", error.message);
   });
 };
@@ -80,7 +86,7 @@ const registerUser = async (req, res) => {
       const token = buildVerificationToken(existingUser);
       await existingUser.save();
 
-      sendEmailInBackground(existingUser, token);
+      sendEmailInBackground(existingUser, token, resolveFrontendBase(req));
 
       return res.status(200).json({
         message:
@@ -99,7 +105,7 @@ const registerUser = async (req, res) => {
     const token = buildVerificationToken(newUser);
     await newUser.save();
 
-    sendEmailInBackground(newUser, token);
+    sendEmailInBackground(newUser, token, resolveFrontendBase(req));
 
     return res.status(201).json({
       message: "User registered successfully",
@@ -232,11 +238,7 @@ const forgotPassword = async (req, res) => {
     const token = buildPasswordResetToken(user);
     await user.save();
 
-    // Resolve the frontend origin: an explicit FRONTEND_URL env var wins, then
-    // the request's Origin header (covers localhost dev and any deployed host),
-    // and localhost last for server-to-server calls from curl during dev.
-    const frontendBase =
-      process.env.FRONTEND_URL || req.get("origin") || "http://localhost:3000";
+    const frontendBase = resolveFrontendBase(req);
 
     // Email sending happens in the background so a slow SMTP provider can
     // never delay the HTTP response.

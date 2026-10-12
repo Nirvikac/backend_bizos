@@ -24,9 +24,12 @@ const buildVerificationHtml = (verificationLink) => `
   <p>This link will expire in 15 minutes.</p>
 `;
 
-const sendVerificationEmail = async (email, verificationToken) => {
-  const baseUrl = process.env.BACKEND_URL || "https://backend-bizos.onrender.com";
-  const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
+const sendVerificationEmail = async (email, verificationToken, frontendBase) => {
+  // Same base resolution as the reset email: the link opens the frontend's
+  // /verify page (which proxies the token to the backend), not the backend's
+  // raw JSON endpoint.
+  const base = (frontendBase || "http://localhost:3000").replace(/\/+$/, "");
+  const verificationLink = `${base}/verify?token=${verificationToken}`;
 
   const response = await fetch(RESEND_ENDPOINT, {
     method: "POST",
